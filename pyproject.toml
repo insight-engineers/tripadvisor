@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "tripadvisor"
+version = "0.1.0"
+description = "A simple web graphing data fetching tool from Tripadvisor"
+authors = ["thangbuiq <buiquangthangtv@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+httpx = {extras = ["brotli", "http2"], version = "^0.28.0"}
+loguru = "^0.7.2"
+parsel = "^1.9.1"
+asyncio = "^3.4.3"
+urllib3 = "^2.2.3"
+
+[tool.poetry.group.dev.dependencies]
+isort = "^5.13.2"
+black = "^24.10.0"
+pre-commit = "^4.0.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
