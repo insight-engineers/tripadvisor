@@ -6,29 +6,37 @@ from parsel import Selector
 import httpx
 from tripadvisor.graph.location import scrape_location_data
 
+
 class Preview(TypedDict):
     url: str
     name: str
+
 
 def parse_search_page(response: httpx.Response) -> List[Preview]:
     """Parse search page to extract preview details."""
     selector = Selector(response.text)
     previews = []
     for box in selector.css("div.listing_title>a"):
-        previews.append({
-            "url": urljoin(str(response.url), box.xpath("@href").get()),
-            "name": box.xpath("text()").get("").strip(),
-        })
+        previews.append(
+            {
+                "url": urljoin(str(response.url), box.xpath("@href").get()),
+                "name": box.xpath("text()").get("").strip(),
+            }
+        )
     return previews
 
-async def scrape_restaurants(query: str, client: httpx.AsyncClient, max_pages: Optional[int] = None) -> List[Preview]:
+
+async def scrape_restaurants(
+    query: str, client: httpx.AsyncClient, max_pages: Optional[int] = None
+) -> List[Preview]:
     """Scrape restaurant search results for a query."""
     location_data = await scrape_location_data(query, client)
     if not location_data:
         log.error(f"No location data found for query: {query}")
         return []
 
-    restaurant_url = "https://www.tripadvisor.com" + location_data[0]["RESTAURANTS_URL"]
+    restaurant_url = "https://www.tripadvisor.com" + location_data[0]["url"]
+    log.info(f"Scraping restaurants for url: {restaurant_url}")
     response = await client.get(restaurant_url)
     response.raise_for_status()
 
@@ -38,7 +46,8 @@ async def scrape_restaurants(query: str, client: httpx.AsyncClient, max_pages: O
         return []
 
     page_size = len(results)
-    total_results = int(response.selector.xpath("//span/text()").re_first(r"(\d+)", "0"))
+    selector = Selector(response.text)
+    total_results = int(selector.xpath("//span/text()").re_first(r"(\d+)", "0"))
     total_pages = math.ceil(total_results / page_size)
     log.info(f"{query}: Total pages: {total_pages}, Total results: {total_results}")
 
