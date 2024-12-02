@@ -1,5 +1,6 @@
 import random
 import string
+
 import httpx
 from loguru import logger as log
 
@@ -10,9 +11,13 @@ BASE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+
 def generate_request_id(length: int = 180) -> str:
     """Generate a random request ID for scraper."""
-    return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(length))
+    return "".join(
+        random.choice(string.ascii_lowercase + string.digits) for _ in range(length)
+    )
+
 
 async def get_http_client() -> httpx.AsyncClient:
     """Set up and return an HTTPX client with headers."""
