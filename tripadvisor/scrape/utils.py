@@ -1,10 +1,10 @@
 import random
 import string
 import unicodedata
+from typing import List, Optional, TypedDict
+
 import httpx
 from loguru import logger as log
-
-from typing import List, Optional, TypedDict
 
 # Base headers for httpx client
 BASE_HEADERS = {

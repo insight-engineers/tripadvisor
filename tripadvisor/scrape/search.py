@@ -1,14 +1,15 @@
 import asyncio
 import json
 import math
+import random
+import string
 from typing import List, Optional
 from urllib.parse import urljoin
 
 import httpx
 from loguru import logger as log
-import random
-import string
 from parsel import Selector
+
 from tripadvisor.scrape.utils import LocationData, get_http_client
 
 

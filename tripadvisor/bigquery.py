@@ -1,10 +1,11 @@
+import re
+
+import pandas as pd
+import sqlparse
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
-from google.api_core.exceptions import GoogleAPIError
-import sqlparse
 from loguru import logger as log
-import pandas as pd
-import re
 
 
 class BigQueryHandler:

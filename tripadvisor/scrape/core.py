@@ -1,12 +1,13 @@
 import asyncio
 import json
-from typing import Dict, List
-from tripadvisor.scrape.utils import get_http_client, normalize_text
-from bs4 import BeautifulSoup
 import re
+from typing import Dict, List
 
-from loguru import logger as log
 import httpx
+from bs4 import BeautifulSoup
+from loguru import logger as log
+
+from tripadvisor.scrape.utils import get_http_client, normalize_text
 
 
 def normalize_int(text: str) -> int:

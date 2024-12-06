@@ -6,9 +6,9 @@ from datetime import datetime
 import pandas as pd
 from loguru import logger as log
 
-from tripadvisor.bigquery import BigQueryHandler
 from tripadvisor.api.content import TripAdvisorAPI
 from tripadvisor.api.rapid import TripAdvisorRapidAPI
+from tripadvisor.bigquery import BigQueryHandler
 from tripadvisor.scrape.core import scrape_url
 
 
