@@ -37,17 +37,15 @@ class TripAdvisorAPI:
 
 
 if __name__ == "__main__":
-    lat = 10.8231  # Test only, lat of Thao Dien, District 2, HCMC
-    long = 106.6297  # Test only, lat of Thao Dien, District 2, HCMC
     import dotenv
 
     dotenv.load_dotenv()
-
     api_key = os.getenv("TRIPADVISOR_API_KEY")
+    TEST_LAT, TEST_LONG = 10.8231, 106.6297
 
     try:
         api = TripAdvisorAPI(api_key)
-        locations = api.get_nearby_locations(lat, long)
+        locations = api.get_nearby_locations(TEST_LAT, TEST_LONG)
         print(locations)
     except Exception as e:
         print(f"An error occurred: {e}")

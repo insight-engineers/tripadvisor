@@ -1,71 +1,241 @@
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 import pandas as pd
-from google.cloud import bigquery
-from google.oauth2 import service_account
 from loguru import logger as log
 
+from tripadvisor.bigquery import BigQueryHandler
 from tripadvisor.api.content import TripAdvisorAPI
-from tripadvisor.graph.reviews import scrape_reviews
+from tripadvisor.api.rapid import TripAdvisorRapidAPI
+from tripadvisor.scrape.core import scrape_url
 
 
 class TripAdvisorDataFetcher:
     def __init__(
-        self, project_id, dataset_id, table_id, credentials_path, api_key_env_var
+        self,
+        project_id: str,
+        geo_dataset_id: str,
+        geo_table_id: str,
+        credentials_path: str,
+        api_key_env_var: str,
+        rapid_api_key_env: str,
     ):
+        """
+        Initialize the TripAdvisorDataFetcher.
+
+        Args:
+            project_id (str): GCP project ID.
+            geo_dataset_id (str): BigQuery dataset ID.
+            geo_table_id (str): BigQuery geolocation table ID.
+            credentials_path (str): Path to service account JSON key file.
+            api_key_env_var (str): env name for TripAdvisor API key.
+            rapid_api_key_env (str): env name for RapidAPI key.
+        """
         log.info("Initializing TripAdvisorDataFetcher...")
-        self.credentials = service_account.Credentials.from_service_account_file(
-            credentials_path
-        )
-        self.client = bigquery.Client(project=project_id, credentials=self.credentials)
-        self.dataset_id = dataset_id
-        self.table_id = table_id
+
+        if not project_id:
+            raise ValueError("Please provide a GCP project ID")
+        else:
+            self.project_id = project_id
+
+        self.bigquery = BigQueryHandler(self.project_id, credentials_path)
+        self.geo_table_id = geo_table_id
         self.api_key = os.getenv(api_key_env_var)
+        self.rapid_api_key = os.getenv(rapid_api_key_env)
 
-        if not self.api_key:
-            log.error(f"API key not found in environment variable: {api_key_env_var}")
-            raise ValueError(
-                f"API key not found in environment variable: {api_key_env_var}"
-            )
+        if self.rapid_api_key:
+            self.tripadvisor_rapid = TripAdvisorRapidAPI(self.rapid_api_key)
 
-        self.tripadvisor = TripAdvisorAPI(self.api_key)
+        if self.api_key:
+            self.tripadvisor = TripAdvisorAPI(self.api_key)
+        else:
+            log.error(f"API key not found in env: {api_key_env_var}")
+            raise ValueError(f"API key not found in env: {api_key_env_var}")
+
         log.success("TripAdvisorDataFetcher initialized successfully!")
 
-    def fetch_bigquery(self):
-        log.info("Fetching geolocation data from BigQuery...")
-        query = f"""
-        SELECT latitude, longitude
-        FROM `{self.dataset_id}.{self.table_id}`
+    def fetch_geolocation(self) -> pd.DataFrame:
         """
-        dataframe = self.client.query(query).to_dataframe()
-        log.success(f"Fetched {len(dataframe)} geolocation records from BigQuery.")
-        return dataframe
+        Fetch geolocation data from BigQuery.
 
-    def fetch_location_data(self, lat, long):
-        log.info(f"Fetching location data for latitude={lat}, longitude={long}...")
-        location_data = self.tripadvisor.get_nearby_locations(lat, long)
-        log.debug(f"Found {len(location_data['data'])} nearby locations.")
-        return location_data["data"]
+        Returns:
+            pd.DataFrame: DataFrame containing latitude and longitude data.
+        """
+        try:
+            log.info("Fetching geolocation data from BigQuery...")
+            query = f"""
+            SELECT latitude, longitude
+            FROM `{self.project_id}.{self.geo_dataset_id}.{self.geo_table_id}`
+            """
+            dataframe = self.bigquery.fetch_bigquery(query)
+            log.success(f"Fetched {len(dataframe)} geolocation records from BigQuery.")
+            return dataframe
+        except Exception as e:
+            log.error("Failed to fetch data from BigQuery.")
+            log.exception(e)
+            raise
 
-    async def scrape_location_reviews(self, location):
-        location_id = location["location_id"]
-        location_url = self.tripadvisor.get_location_url(location_id, full=True)
-        log.info(f"Scraping reviews for location ID: {location_id}...")
-        reviews = await scrape_reviews(location_url)
-        log.debug(f"Scraped {len(reviews)} reviews for location ID {location_id}.")
-        return {
-            "location_id": location_id,
-            "location_url": location_url,
-            "reviews": reviews,
-        }
+    def fetch_location_data(self, lat, long) -> list:
+        """
+        Fetch location data from TripAdvisor API for a given latitude and longitude.
 
-    async def fetch_reviews(self, geolocations, max_workers=4):
-        log.info(f"Fetching reviews for {len(geolocations)} geolocations...")
+        Args:
+            lat (float): Latitude.
+            long (float): Longitude.
 
-        location_info = []
-        reviews = []
+        Returns:
+            list: List of location data dictionaries.
+        """
+        try:
+            log.info(f"Fetching location data for latitude={lat}, longitude={long}...")
+            location_data = self.tripadvisor.get_nearby_locations(lat, long)
+            log.debug(f"Found {len(location_data['data'])} nearby locations.")
+            return location_data["data"]
+        except Exception as e:
+            log.error(
+                f"Failed to fetch location data for latitude={lat}, longitude={long}."
+            )
+            log.exception(e)
+            return []
+
+    def fetch_location_list(self, dataset_id, table_id) -> list:
+        """
+        Fetch a list of locations from BigQuery.
+
+        Args:
+            dataset_id (str): BigQuery dataset ID containing location data.
+            table_id (str): BigQuery table ID containing location data.
+
+        Returns:
+            list: List of unique location IDs.
+        """
+        try:
+            log.info(f"Fetching location list from: {dataset_id}.{table_id}")
+            query = f"""
+            SELECT DISTINCT location_id
+            FROM `{self.project_id}.{dataset_id}.{table_id}`
+            """
+            dataframe = self.bigquery.fetch_bigquery(query)
+            location_list = dataframe["location_id"].tolist()
+
+            log.success(f"Fetched {len(location_list)} unique location IDs.")
+            return location_list
+        except Exception as e:
+            log.error("No location list found in BigQuery.")
+            log.exception(e)
+            return []
+
+    async def scrape_location(self, location) -> dict:
+        """
+        Scrape detailed information for a given location.
+
+        Args:
+            location (dict): A dictionary containing location information.
+
+        Returns:
+            dict: Scraped information for the location.
+        """
+        try:
+            location_id = location["location_id"]
+            location_url = self.tripadvisor.get_location_url(location_id, full=True)
+            log.info(f"Scraping reviews for location ID: {location_id}...")
+            scrape_info = await scrape_url(location_url)
+
+            if (
+                scrape_info["review_count_scraped"] == 0
+                and scrape_info["review_count"] > 0
+            ):
+                log.warning(
+                    f"No reviews scraped for location ID: {location_id}. Falling back to RapidAPI..."
+                )
+                reviews = self.tripadvisor_rapid.get_parsed_restaurant_reviews(
+                    location_url
+                )
+                scrape_info["reviews"] = reviews
+
+            return {
+                "location_id": location_id,
+                "location_url": location_url,
+                "address_from_url": scrape_info["address_from_url"],
+                "google_maps_link": scrape_info["google_maps_link"],
+                "lat": scrape_info["lat"],
+                "long": scrape_info["long"],
+                "price_range": scrape_info["price_range"],
+                "cuisine": scrape_info["cuisine"],
+                "ranking": scrape_info["ranking"],
+                "rating": scrape_info["rating"],
+                "review_count": scrape_info["review_count"],
+                "review_count_scraped": scrape_info["review_count_scraped"],
+                "reviews": scrape_info["reviews"],
+            }
+        except Exception as e:
+            log.error(f"Error scraping location: {location}")
+            log.exception(e)
+            return {}
+
+    async def scrape_location_by_id(self, location_id) -> dict:
+        """
+        Scrape detailed information for a given location by ID.
+
+        Args:
+            location_id (str): The location ID to scrape.
+
+        Returns:
+            dict: Scraped information for the location.
+        """
+        try:
+            location_url = self.tripadvisor.get_location_url(location_id, full=True)
+            log.info(f"Scraping reviews for location ID: {location_id}...")
+            scrape_info = await scrape_url(location_url)
+
+            if (
+                scrape_info["review_count_scraped"] == 0
+                and scrape_info["review_count"] > 1
+            ):
+                log.warning(
+                    f"No reviews scraped for location ID: {location_id}. Falling back to RapidAPI..."
+                )
+                reviews = self.tripadvisor_rapid.get_parsed_restaurant_reviews(
+                    location_url
+                )
+                scrape_info["reviews"] = reviews
+
+            return {
+                "location_id": location_id,
+                "location_url": location_url,
+                "address_from_url": scrape_info["address_from_url"],
+                "google_maps_link": scrape_info["google_maps_link"],
+                "lat": scrape_info["lat"],
+                "long": scrape_info["long"],
+                "price_range": scrape_info["price_range"],
+                "cuisine": scrape_info["cuisine"],
+                "ranking": scrape_info["ranking"],
+                "rating": scrape_info["rating"],
+                "review_count": scrape_info["review_count"],
+                "review_count_scraped": scrape_info["review_count_scraped"],
+                "reviews": scrape_info["reviews"],
+            }
+        except Exception as e:
+            log.error(f"Error scraping location ID: {location_id}")
+            log.exception(e)
+            return {}
+
+    async def fetch_full_workflow(self, geolocations, max_workers=4) -> pd.DataFrame:
+        """
+        Fetch and scrape data for multiple geolocations.
+
+        Args:
+            geolocations (list): List of geolocation tuples (latitude, longitude).
+            max_workers (int): Number of concurrent threads for fetching.
+
+        Returns:
+            pd.DataFrame: DataFrame containing scraped information.
+        """
+        log.info(f"Fetching for {len(geolocations)} geolocations...")
+
+        scrape_info = []
 
         # Fetch location data in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -77,48 +247,97 @@ class TripAdvisorDataFetcher:
                 ]
             )
 
-        # Flatten the location data results
-        for loc_data in location_results:
-            location_info.extend(loc_data)
-
         # Scrape reviews asynchronously
-        review_results = await asyncio.gather(
-            *[self.scrape_location_reviews(location) for location in location_info]
-        )
+        for loc_data in location_results:
+            for location in loc_data:
+                scrape_result = await self.scrape_location(location)
+                if scrape_result:
+                    scrape_info.append(scrape_result)
+                await asyncio.sleep(1)  # Adding delay to avoid rate-limiting
 
-        # Collect review data
-        reviews.extend(review_results)
+        log.success(f"Successfully scraped {len(scrape_info)} locations.")
+        return pd.DataFrame(scrape_info)
 
-        log.success(f"Successfully fetched reviews for {len(location_info)} locations.")
-        return pd.DataFrame(reviews), pd.DataFrame(location_info)
+    async def fetch_scraper_and_write(
+        self, dataset_id: str, location_list_table_id: str, scraper_table_id: str
+    ):
+        """
+        Fetch location data, scrape it, and write to BigQuery.
 
-    def save_to_parquet(self, dataframe, file_path):
-        log.info(f"Saving DataFrame to {file_path}...")
-        dataframe.to_parquet(file_path)
-        log.success(f"Data saved to {file_path}.")
+        Args:
+            dataset_id (str): BigQuery dataset ID containing two tables.
+            location_list_table_id (str): BigQuery table ID containing location data.
+            scraper_table_id (str): BigQuery table ID to write scraped data.
+        """
+        try:
+            location_list = self.fetch_location_list(dataset_id, location_list_table_id)
+            scrape_info = []
+
+            for location_id in location_list:
+                scrape_result = await self.scrape_location_by_id(location_id)
+                if scrape_result:
+                    scrape_info.append(scrape_result)
+                await asyncio.sleep(0.5)  # Adding delay to avoid being blocked
+
+            scrape_df = pd.DataFrame(scrape_info)
+            parquet_file_path = f"data/tripadvisor__scrape_info_{datetime.now().strftime('%Y%m%d')}.parquet"
+
+            if not os.path.exists("data"):
+                os.makedirs("data")
+
+            self.save_to_parquet(scrape_df, parquet_file_path)
+            self.bigquery.upload_parquet_to_bq(
+                file_path=parquet_file_path,
+                full_table_id=f"{dataset_id}.{scraper_table_id}",
+                write_disposition="WRITE_TRUNCATE",
+            )
+
+            log.success("Data fetched, scraped, and written to BigQuery.")
+
+        except Exception as e:
+            log.error("Failed to fetch and write data.")
+            log.exception(e)
+
+    def save_to_parquet(self, dataframe, parquet_file_path):
+        """
+        Save a DataFrame to a Parquet file.
+
+        Args:
+            dataframe (pd.DataFrame): The DataFrame to save.
+            parquet_file_path (str): The path to the Parquet file.
+        """
+        try:
+            dataframe.to_parquet(parquet_file_path)
+            log.success(f"Data saved to {parquet_file_path}.")
+            return parquet_file_path
+        except Exception as e:
+            log.error(f"Failed to save DataFrame to {parquet_file_path}.")
+            log.exception(e)
 
 
 if __name__ == "__main__":
 
     async def run():
         log.info("Starting TripAdvisor data fetcher script...")
-        fetcher = TripAdvisorDataFetcher(
-            project_id="tripadvisor-recommendations",
-            dataset_id="dm_tripadvisor",
-            table_id="base_tripadvisor__geolocation",
-            credentials_path="sa.json",
-            api_key_env_var="TRIPADVISOR_API_KEY",
-        )
+        try:
+            tripadvisor = TripAdvisorDataFetcher(
+                project_id="tripadvisor-recommendations",
+                geo_dataset_id="dm_tripadvisor",
+                geo_table_id="base_tripadvisor__geolocation",
+                credentials_path="sa.json",
+                api_key_env_var="TRIPADVISOR_API_KEY",
+                rapid_api_key_env="RAPID_API_KEY",
+            )
 
-        geolocations = fetcher.fetch_bigquery()[["latitude", "longitude"]].values
-        log.info("Geolocation data prepared for review scraping.")
+            await tripadvisor.fetch_scraper_and_write(
+                dataset_id="raw_tripadvisor",
+                location_list_table_id="source_tripadvisor__api_info",
+                scraper_table_id="source_tripadvisor__scrape_info",
+            )
 
-        reviews_df, location_info_df = await fetcher.fetch_reviews(geolocations)
-
-        # Sink to parquet (in data folder)
-        fetcher.save_to_parquet(reviews_df, "data/reviews.parquet")
-        fetcher.save_to_parquet(location_info_df, "data/location_info.parquet")
-
-        log.success("TripAdvisor data fetcher script completed successfully!")
+            log.success("TripAdvisor data fetcher script completed successfully!")
+        except Exception as e:
+            log.error("Script encountered an error.")
+            log.exception(e)
 
     asyncio.run(run())
