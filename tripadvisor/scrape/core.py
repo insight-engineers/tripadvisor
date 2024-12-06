@@ -7,23 +7,8 @@ import httpx
 from bs4 import BeautifulSoup
 from loguru import logger as log
 
-from tripadvisor.scrape.utils import get_http_client, normalize_text
-
-
-def normalize_int(text: str) -> int:
-    """Normalize an integer value from a string
-    Parameters:
-        text (str): The string to normalize.
-    """
-    return int(text.strip().replace(",", "").replace("#", "").replace(".", ""))
-
-
-def normalize_float(text: str) -> float:
-    """Normalize a float value from a string.
-    Parameters:
-        text (str): The string to normalize.
-    """
-    return float(text.strip().replace(",", "").replace("#", ""))
+from tripadvisor.scrape.utils import (get_http_client, normalize_float,
+                                      normalize_int, normalize_text)
 
 
 async def parse_reviews(url, count):
