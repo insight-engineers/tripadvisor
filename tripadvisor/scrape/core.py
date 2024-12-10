@@ -3,12 +3,16 @@ import json
 import re
 from typing import Dict, List
 
-import httpx
-from bs4 import BeautifulSoup
 from loguru import logger as log
 
-from tripadvisor.scrape.utils import (get_http_client, normalize_float,
-                                      normalize_int, normalize_text)
+from tripadvisor._constants import SCRAPE_DELAY, SCRAPE_MAX_REVIEWS
+from tripadvisor.scrape.utils import (
+    fetch_soup_from_url,
+    get_httpx_client,
+    normalize_float,
+    normalize_int,
+    normalize_text,
+)
 
 
 async def parse_reviews(url, count):
@@ -18,27 +22,39 @@ async def parse_reviews(url, count):
         count (int): The number of all reviews in that page for cross-checking.
     """
     if count <= 0:
-        log.info("Count must be greater than 0.")
+        log.warning("There are no reviews to parse. Skipping...")
         return []
+
     if not url.endswith("#REVIEWS"):
         url += "#REVIEWS"
 
-    max_reviews = min(count, 30)
+    max_reviews = min(count, SCRAPE_MAX_REVIEWS)
     reviews = []
     page_increment = 15
-    client = get_http_client(True)
 
     for start in range(0, max_reviews, page_increment):
-        page_url = url.replace("-Reviews-", f"-Reviews-or{start}-")
-        log.info(f"Parsing: {page_url}")
+        if start > 0:
+            review_page_url = url.replace("-Reviews-", f"-Reviews-or{start}-")
+        else:
+            review_page_url = url
+        log.info(f"Parsing: {review_page_url}")
 
-        soup = await fetch_utf8(client, page_url)
+        async with get_httpx_client(follow_redirects=False) as client:
+            soup = await fetch_soup_from_url(client=client, url=review_page_url)
+
         review_blocks = soup.select("div[data-automation='reviewCard']")
+
         if not review_blocks:
             log.warning("No reviewCard found. Skipping...")
             break
 
         for review in review_blocks:
+            try:
+                review_tag = review.select_one("a[target*='_self']")
+                review_userid = normalize_text(review_tag.get("href").split("/")[-1])
+            except:
+                review_userid = None
+
             try:
                 review_title = normalize_text(
                     review.select_one(
@@ -46,7 +62,8 @@ async def parse_reviews(url, count):
                     ).get_text(strip=True)
                 )
             except:
-                review_title = "UNKNOWN"
+                review_title = None
+
             try:
                 review_text = normalize_text(
                     " ".join(
@@ -57,7 +74,7 @@ async def parse_reviews(url, count):
                     )
                 )
             except:
-                review_text = "UNKNOWN"
+                review_text = None
 
             try:
                 rating_element = review.select_one("div[class*='OSBmi'] svg title")
@@ -79,7 +96,8 @@ async def parse_reviews(url, count):
                 )
                 review_date = normalize_text(" ".join(review_date))
             except:
-                review_date = "UNKNOWN"
+                review_date = None
+
             try:
                 review_type = normalize_text(
                     review.select_one("div[class*='aVuQn'] span[class*='DlAxN']")
@@ -87,10 +105,11 @@ async def parse_reviews(url, count):
                     .upper()
                 )
             except:
-                review_type = "UNKNOWN"
+                review_type = None
 
             reviews.append(
                 {
+                    "user": review_userid,
                     "title": review_title,
                     "text": review_text.replace("Read more", "").strip(),
                     "rating": rating,
@@ -102,7 +121,7 @@ async def parse_reviews(url, count):
         if len(reviews) >= max_reviews:
             break
 
-        await asyncio.sleep(1)  # Add delay to avoid getting blocked
+        await asyncio.sleep(SCRAPE_DELAY)
 
     return reviews
 
@@ -130,9 +149,9 @@ async def parse_source_page(url, soup) -> Dict:
             price_range = price_range.group(0).strip()
             log.info(f"Price range: {price_range}")
         else:
-            price_range = "UNKNOWN"
+            price_range = None
     except:
-        price_range = "UNKNOWN"
+        price_range = None
 
     try:
         review_count = normalize_int(
@@ -161,7 +180,7 @@ async def parse_source_page(url, soup) -> Dict:
             )
         )
     except:
-        rating_number = -1
+        rating_number = None
 
     try:
         ranking = normalize_int(
@@ -170,28 +189,41 @@ async def parse_source_page(url, soup) -> Dict:
             )
         )
     except:
-        ranking = -1
+        ranking = None
 
     try:
         google_maps_link = location_tab.select_one("a").get("href")
     except:
-        google_maps_link = ""
+        google_maps_link = None
 
     try:
         address_from_url = google_maps_link.split("@")[0].split("=")[-1]
     except:
-        address_from_url = ""
+        address_from_url = None
 
     try:
         lat, long = google_maps_link.split("@")[1].split(",")
     except:
-        lat = "-1.0"
-        long = "-1.0"
+        lat, long = None, None
+
+    try:
+        tel = location_tab.select_one("a[aria-label='Call']").get_text(strip=True)
+    except:
+        tel = None
+
+    try:
+        open_hour = info_div.select_one(
+            "span[data-automation='top-info-hours']"
+        ).get_text(strip=False)
+    except:
+        open_hour = None
 
     reviews = await parse_reviews(url, review_count)
 
     return {
         "url": url,
+        "tel": tel,
+        "open_hour": open_hour,
         "address_from_url": address_from_url,
         "google_maps_link": google_maps_link,
         "lat": float(lat.strip().replace(",", "")),
@@ -206,38 +238,19 @@ async def parse_source_page(url, soup) -> Dict:
     }
 
 
-async def fetch_utf8(client, url: str):
-    """Fetch a URL and return the page source as a BeautifulSoup object.
-    Parameters:
-        client (httpx.Client): The HTTP client to use for fetching the URL.
-        url (str): The URL to fetch.
-    """
-
-    try:
-        response = await client.get(url)
-        response.raise_for_status()
-        response.encoding = "utf-8"
-        page_source = response.text
-
-        return BeautifulSoup(page_source, "html.parser")
-    except Exception as e:
-        log.error(f"Error fetching URL: {url}")
-        log.error(e)
-        raise e
-
-
 async def scrape_url(url: str) -> List[Dict]:
     """Scrape a URL and return the parsed information from the url.
     Parameters:
         url (str): The URL to scrape.
     """
 
-    attempt, delay, retries = 0, 2, 100
+    attempt, retries = 0, 100
     while attempt < retries:
         try:
             log.info(f"Fetching URL: {url} for attempt {attempt + 1}/{retries}...")
-            client = get_http_client(False)
-            soup = await fetch_utf8(client, url)
+
+            async with get_httpx_client(follow_redirects=True) as client:
+                soup = await fetch_soup_from_url(client=client, url=url)
 
             if (
                 soup.find("div", {"data-automation": "reviewsOverviewSections"})
@@ -249,25 +262,19 @@ async def scrape_url(url: str) -> List[Dict]:
                 return parsed_info
 
             log.info("Retrying fetch for overview tab...")
-            del client
             attempt += 1
 
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            log.info(f"Error on attempt {attempt + 1}/{retries}: {e}")
-            log.info(f"Retrying in {delay} seconds...")
-            attempt += 1
         except Exception as e:
-            log.error(f"Error scraping URL: {url}")
-            log.error(e)
-            raise e
+            log.info(f"Error on attempt {attempt + 1}/{retries}: {e}")
+            log.info(f"Retrying in {SCRAPE_DELAY * 2} seconds...")
+            attempt += 1
+
         finally:
-            await asyncio.sleep(delay)
+            await asyncio.sleep(SCRAPE_DELAY * 2)
 
 
 if __name__ == "__main__":
     TEST_URLS = [
-        "https://www.tripadvisor.com/Restaurant_Review-g293925-d1717810-Reviews-Cuc_Gach_Quan-Ho_Chi_Minh_City.html",
-        "https://www.tripadvisor.com/Restaurant_Review-g293925-d14028387-Reviews-Kyushu_Sakaba_Sho-Ho_Chi_Minh_City.html",
         "https://www.tripadvisor.com/Restaurant_Review-g293925-d8614066-Reviews-Quan_B_i-Ho_Chi_Minh_City.html",
     ]
 

@@ -6,7 +6,8 @@ from datetime import datetime
 import pandas as pd
 from loguru import logger as log
 
-from tripadvisor.api.content import TripAdvisorAPI
+from tripadvisor._constants import SCRAPE_DELAY
+from tripadvisor.api.content import TripAdvisorContentAPI
 from tripadvisor.api.rapid import TripAdvisorRapidAPI
 from tripadvisor.bigquery import BigQueryHandler
 from tripadvisor.scrape.core import scrape_url
@@ -41,6 +42,7 @@ class TripAdvisorDataFetcher:
             self.project_id = project_id
 
         self.bigquery = BigQueryHandler(self.project_id, credentials_path)
+        self.geo_dataset_id = geo_dataset_id
         self.geo_table_id = geo_table_id
         self.api_key = os.getenv(api_key_env_var)
         self.rapid_api_key = os.getenv(rapid_api_key_env)
@@ -49,7 +51,7 @@ class TripAdvisorDataFetcher:
             self.tripadvisor_rapid = TripAdvisorRapidAPI(self.rapid_api_key)
 
         if self.api_key:
-            self.tripadvisor = TripAdvisorAPI(self.api_key)
+            self.tripadvisor = TripAdvisorContentAPI(self.api_key)
         else:
             log.error(f"API key not found in env: {api_key_env_var}")
             raise ValueError(f"API key not found in env: {api_key_env_var}")
@@ -186,8 +188,8 @@ class TripAdvisorDataFetcher:
             dict: Scraped information for the location.
         """
         try:
-            location_url = self.tripadvisor.get_location_url(location_id, full=True)
             log.info(f"Scraping reviews for location ID: {location_id}...")
+            location_url = self.tripadvisor.get_location_url(location_id, full=True)
             scrape_info = await scrape_url(location_url)
 
             if (
@@ -209,6 +211,8 @@ class TripAdvisorDataFetcher:
                 "google_maps_link": scrape_info["google_maps_link"],
                 "lat": scrape_info["lat"],
                 "long": scrape_info["long"],
+                "tel": scrape_info["tel"],
+                "open_hour": scrape_info["open_hour"],
                 "price_range": scrape_info["price_range"],
                 "cuisine": scrape_info["cuisine"],
                 "ranking": scrape_info["ranking"],
@@ -237,7 +241,6 @@ class TripAdvisorDataFetcher:
 
         scrape_info = []
 
-        # Fetch location data in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             loop = asyncio.get_event_loop()
             location_results = await asyncio.gather(
@@ -247,19 +250,22 @@ class TripAdvisorDataFetcher:
                 ]
             )
 
-        # Scrape reviews asynchronously
         for loc_data in location_results:
             for location in loc_data:
                 scrape_result = await self.scrape_location(location)
                 if scrape_result:
                     scrape_info.append(scrape_result)
-                await asyncio.sleep(1)  # Adding delay to avoid rate-limiting
+                await asyncio.sleep(SCRAPE_DELAY)
 
         log.success(f"Successfully scraped {len(scrape_info)} locations.")
         return pd.DataFrame(scrape_info)
 
     async def fetch_scraper_and_write(
-        self, dataset_id: str, location_list_table_id: str, scraper_table_id: str
+        self,
+        dataset_id: str,
+        location_list_table_id: str,
+        scraper_table_id: str,
+        max_locations: int = None,
     ):
         """
         Fetch location data, scrape it, and write to BigQuery.
@@ -273,11 +279,15 @@ class TripAdvisorDataFetcher:
             location_list = self.fetch_location_list(dataset_id, location_list_table_id)
             scrape_info = []
 
+            if max_locations:
+                location_list = location_list[:max_locations]
+
             for location_id in location_list:
                 scrape_result = await self.scrape_location_by_id(location_id)
                 if scrape_result:
                     scrape_info.append(scrape_result)
-                await asyncio.sleep(0.5)  # Adding delay to avoid being blocked
+
+                await asyncio.sleep(SCRAPE_DELAY)
 
             scrape_df = pd.DataFrame(scrape_info)
             parquet_file_path = f"data/tripadvisor__scrape_info_{datetime.now().strftime('%Y%m%d')}.parquet"
@@ -333,6 +343,7 @@ if __name__ == "__main__":
                 dataset_id="raw_tripadvisor",
                 location_list_table_id="source_tripadvisor__api_info",
                 scraper_table_id="source_tripadvisor__scrape_info",
+                max_locations=10,
             )
 
             log.success("TripAdvisor data fetcher script completed successfully!")
