@@ -1,3 +1,3 @@
 format:
-	poetry run black .
-	poetry run isort .
+	uvx black .
+	uvx isort .

@@ -1,16 +1,13 @@
+import asyncio
 import unicodedata
 from typing import Optional
+
 import httpx
-import asyncio
 from bs4 import BeautifulSoup
 from loguru import logger as log
 
-from tripadvisor._constants import (
-    BASE_HEADERS,
-    SCRAPE_ENCODING,
-    SCRAPE_TIMEOUT,
-    SCRAPE_DELAY,
-)
+from tripadvisor._constants import (BASE_HEADERS, SCRAPE_DELAY,
+                                    SCRAPE_ENCODING, SCRAPE_TIMEOUT)
 
 
 def get_httpx_client(
