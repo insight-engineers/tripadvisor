@@ -6,9 +6,13 @@ from typing import Dict, List
 from loguru import logger as log
 
 from tripadvisor._constants import SCRAPE_DELAY, SCRAPE_MAX_REVIEWS
-from tripadvisor.scrape.utils import (fetch_soup_from_url, get_httpx_client,
-                                      normalize_float, normalize_int,
-                                      normalize_text)
+from tripadvisor.scrape.utils import (
+    fetch_soup_from_url,
+    get_httpx_client,
+    normalize_float,
+    normalize_int,
+    normalize_text,
+)
 
 
 async def parse_reviews(url, count):

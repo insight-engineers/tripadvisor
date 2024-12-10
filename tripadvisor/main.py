@@ -10,6 +10,7 @@ from tripadvisor._constants import SCRAPE_DELAY
 from tripadvisor.api.content import TripAdvisorContentAPI
 from tripadvisor.api.rapid import TripAdvisorRapidAPI
 from tripadvisor.bigquery import BigQueryHandler
+from tripadvisor.parser import TripAdvisorParser
 from tripadvisor.scrape.core import scrape_url
 
 
@@ -265,7 +266,7 @@ class TripAdvisorDataFetcher:
         dataset_id: str,
         location_list_table_id: str,
         scraper_table_id: str,
-        max_locations: int = None,
+        max_locations: int,
     ):
         """
         Fetch location data, scrape it, and write to BigQuery.
@@ -279,7 +280,7 @@ class TripAdvisorDataFetcher:
             location_list = self.fetch_location_list(dataset_id, location_list_table_id)
             scrape_info = []
 
-            if max_locations:
+            if max_locations != -1:
                 location_list = location_list[:max_locations]
 
             for location_id in location_list:
@@ -326,27 +327,28 @@ class TripAdvisorDataFetcher:
 
 
 if __name__ == "__main__":
+    args = TripAdvisorParser.parse_arguments()
 
     async def run():
         log.info("Starting TripAdvisor data fetcher script...")
         try:
             tripadvisor = TripAdvisorDataFetcher(
-                project_id="tripadvisor-recommendations",
-                geo_dataset_id="dm_tripadvisor",
-                geo_table_id="base_tripadvisor__geolocation",
-                credentials_path="sa.json",
-                api_key_env_var="TRIPADVISOR_API_KEY",
-                rapid_api_key_env="RAPID_API_KEY",
+                project_id=args.project_id,
+                geo_dataset_id=args.geo_dataset_id,
+                geo_table_id=args.geo_table_id,
+                credentials_path=args.credentials_path,
+                api_key_env_var=args.api_key_env_var,
+                rapid_api_key_env=args.rapid_api_key_env,
             )
 
             await tripadvisor.fetch_scraper_and_write(
-                dataset_id="raw_tripadvisor",
-                location_list_table_id="source_tripadvisor__api_info",
-                scraper_table_id="source_tripadvisor__scrape_info",
-                max_locations=10,
+                dataset_id=args.dataset_id,
+                location_list_table_id=args.location_list_table_id,
+                scraper_table_id=args.scraper_table_id,
+                max_locations=args.max_locations,
             )
 
-            log.success("TripAdvisor data fetcher script completed successfully!")
+            log.info("TripAdvisor data fetcher script completed successfully!")
         except Exception as e:
             log.error("Script encountered an error.")
             log.exception(e)
