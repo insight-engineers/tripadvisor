@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import pandas as pd
+from dotenv import load_dotenv
 from loguru import logger as log
 
 from tripadvisor._constants import SCRAPE_DELAY
@@ -326,31 +327,33 @@ class TripAdvisorDataFetcher:
             log.exception(e)
 
 
+async def run():
+    log.info("Starting TripAdvisor data fetcher script...")
+    try:
+        tripadvisor = TripAdvisorDataFetcher(
+            project_id=args.project_id,
+            geo_dataset_id=args.geo_dataset_id,
+            geo_table_id=args.geo_table_id,
+            credentials_path=args.credentials_path,
+            api_key_env_var=args.api_key_env_var,
+            rapid_api_key_env=args.rapid_api_key_env,
+        )
+
+        await tripadvisor.fetch_scraper_and_write(
+            dataset_id=args.dataset_id,
+            location_list_table_id=args.location_list_table_id,
+            scraper_table_id=args.scraper_table_id,
+            max_locations=args.max_locations,
+        )
+
+        log.info("TripAdvisor data fetcher script completed successfully!")
+    except Exception as e:
+        log.error("Script encountered an error.")
+        log.exception(e)
+
+
 if __name__ == "__main__":
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    load_dotenv(dotenv_path)
     args = TripAdvisorParser.parse_arguments()
-
-    async def run():
-        log.info("Starting TripAdvisor data fetcher script...")
-        try:
-            tripadvisor = TripAdvisorDataFetcher(
-                project_id=args.project_id,
-                geo_dataset_id=args.geo_dataset_id,
-                geo_table_id=args.geo_table_id,
-                credentials_path=args.credentials_path,
-                api_key_env_var=args.api_key_env_var,
-                rapid_api_key_env=args.rapid_api_key_env,
-            )
-
-            await tripadvisor.fetch_scraper_and_write(
-                dataset_id=args.dataset_id,
-                location_list_table_id=args.location_list_table_id,
-                scraper_table_id=args.scraper_table_id,
-                max_locations=args.max_locations,
-            )
-
-            log.info("TripAdvisor data fetcher script completed successfully!")
-        except Exception as e:
-            log.error("Script encountered an error.")
-            log.exception(e)
-
     asyncio.run(run())
