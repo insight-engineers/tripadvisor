@@ -2,14 +2,12 @@ import os
 
 import requests
 
+from tripadvisor._constants import BASE_HEADERS
 
-class TripAdvisorAPI:
+
+class TripAdvisorContentAPI:
     BASE_URL = "https://api.content.tripadvisor.com/api/v1/location/nearby_search"
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
-        "Accept": "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    HEADERS = BASE_HEADERS
 
     def __init__(self, api_key):
         if not api_key:
@@ -44,7 +42,7 @@ if __name__ == "__main__":
     TEST_LAT, TEST_LONG = 10.8231, 106.6297
 
     try:
-        api = TripAdvisorAPI(api_key)
+        api = TripAdvisorContentAPI(api_key)
         locations = api.get_nearby_locations(TEST_LAT, TEST_LONG)
         print(locations)
     except Exception as e:

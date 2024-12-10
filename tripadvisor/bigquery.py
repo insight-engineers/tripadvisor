@@ -1,5 +1,3 @@
-import re
-
 import pandas as pd
 import sqlparse
 from google.api_core.exceptions import GoogleAPIError
@@ -10,7 +8,7 @@ from loguru import logger as log
 
 class BigQueryHandler:
     """
-    A handler for interacting with BigQuery, including table management, data upload, and fetching queries.
+    BigQueryHandler for interacting with BigQuery, including table management, data upload, and fetching queries.
     """
 
     def __init__(self, project_id: str, credentials_path: str = None):
@@ -47,12 +45,12 @@ class BigQueryHandler:
         _query = sqlparse.format(
             _query,
             reindent=True,
-            keyword_case="upper",
             strip_comments=True,
             strip_whitespace=True,
+            keyword_case="upper",
         )
 
-        log.debug(f"Normalized query: \n{_query}\n")
+        log.debug("Normalized query:\n{}".format(_query))
         return _query
 
     def fetch_bigquery(self, query: str) -> pd.DataFrame:

@@ -5,6 +5,11 @@ import requests
 
 
 class TripAdvisorRapidAPI:
+    """
+    API wrapper for the TripAdvisor RapidAPI service.
+    Use for error handling when parsing reviews only.
+    Limit quota: 200 requests/month
+    """
 
     def __init__(self, api_key):
         self.base_url = "https://real-time-tripadvisor-scraper-api.p.rapidapi.com"
@@ -24,6 +29,7 @@ class TripAdvisorRapidAPI:
     def parse_reviews(self, reviews):
         return [
             {
+                "user": review["user"]["username"],
                 "title": review["title"],
                 "text": review["text"],
                 "rating": float(review["rating"]),
