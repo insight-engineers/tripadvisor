@@ -15,7 +15,7 @@ def get_httpx_client(
 ) -> httpx.AsyncClient:
     """Set up and return an HTTPX client with headers
 
-    Parameters:
+    Args:
         follow_redirects (bool): Whether to follow redirects.
         http2_enabled (bool): Whether to enable HTTP/2.
         max_connections (int): The maximum number of connections to allow.
@@ -37,7 +37,7 @@ async def fetch_soup_from_url(
     """
     Fetch a URL and return the page source as a BeautifulSoup object.
 
-    Parameters:
+    Args:
         client (httpx.AsyncClient): async client create with httpx
         url (str): The URL to fetch.
 
@@ -47,11 +47,10 @@ async def fetch_soup_from_url(
 
     try:
         response = await client.get(url)
+        assert response.status_code != 403, "Blocked by TripAdvisor"
         response.raise_for_status()
         response.encoding = "utf-8"
         return BeautifulSoup(response.text, "html.parser")
-    except httpx.RequestError as req_err:
-        log.error(f"Request err fetching URL: {url} | Details: {req_err}")
     except Exception as e:
         log.error(f"Unexpected err fetching URL: {url} | Error: {e}")
     finally:
@@ -61,7 +60,7 @@ async def fetch_soup_from_url(
 def normalize_text(text):
     """Normalize a string value.
 
-    Parameters:
+    Args:
         text (str): The string to normalize.
     """
     return unicodedata.normalize("NFKC", text) if text else ""
@@ -70,7 +69,7 @@ def normalize_text(text):
 def normalize_int(text: str) -> int:
     """Normalize an integer value from a string
 
-    Parameters:
+    Args:
         text (str): The string to normalize.
     """
     return int(text.strip().replace(",", "").replace("#", "").replace(".", ""))
@@ -79,7 +78,7 @@ def normalize_int(text: str) -> int:
 def normalize_float(text: str) -> float:
     """Normalize a float value from a string.
 
-    Parameters:
+    Args:
         text (str): The string to normalize.
     """
     return float(text.strip().replace(",", "").replace("#", ""))

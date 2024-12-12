@@ -81,6 +81,31 @@ class TripAdvisorDataFetcher:
             log.exception(e)
             raise
 
+    def fetch_scraped_locations(self, scraper_dataset_id, scraper_table_id) -> list:
+        """
+        Fetch scraped location data from BigQuery.
+
+        Args:
+            scraper_dataset_id (str): BigQuery dataset ID containing scraped data.
+            scraper_table_id (str): BigQuery table ID containing scraped data.
+
+        Returns:
+            list: List of scraped location IDs.
+        """
+        try:
+            log.info(f"Fetch scraped location: {scraper_dataset_id}.{scraper_table_id}")
+            query = f"""
+            SELECT location_id
+            FROM `{self.project_id}.{scraper_dataset_id}.{scraper_table_id}`
+            """
+            dataframe = self.bigquery.fetch_bigquery(query)
+            location_list = dataframe["location_id"].tolist()
+            log.success(f"Fetched {len(location_list)} scraped location IDs.")
+            return location_list.unique()
+        except:
+            log.error("Failed to fetch scraped data from BigQuery.")
+            return []
+
     def fetch_location_data(self, lat, long) -> list:
         """
         Fetch location data from TripAdvisor API for a given latitude and longitude.
@@ -227,6 +252,9 @@ class TripAdvisorDataFetcher:
             log.error(f"Error scraping location ID: {location_id}")
             log.exception(e)
             return {}
+        except AssertionError:
+            log.warning("Need to reschedule scraping due to TripAdvisor blocking.")
+            raise AssertionError("Get blocked by TripAdvisor. Stopping scraping.")
 
     async def fetch_full_workflow(self, geolocations, max_workers=4) -> pd.DataFrame:
         """
@@ -277,20 +305,36 @@ class TripAdvisorDataFetcher:
             location_list_table_id (str): BigQuery table ID containing location data.
             scraper_table_id (str): BigQuery table ID to write scraped data.
         """
+        scrape_info = []
         try:
-            location_list = self.fetch_location_list(dataset_id, location_list_table_id)
-            scrape_info = []
+            location_list = self.fetch_location_list(
+                dataset_id=dataset_id, table_id=location_list_table_id
+            )
+            scraped_locations_list = self.fetch_scraped_locations(
+                scraper_dataset_id=dataset_id, scraper_table_id=scraper_table_id
+            )
+
+            # Remove already scraped locations
+            location_list = list(set(location_list) - set(scraped_locations_list))
 
             if max_locations != -1:
                 location_list = location_list[:max_locations]
 
             for location_id in location_list:
+                await asyncio.sleep(SCRAPE_DELAY)
                 scrape_result = await self.scrape_location_by_id(location_id)
+
                 if scrape_result:
                     scrape_info.append(scrape_result)
 
-                await asyncio.sleep(SCRAPE_DELAY)
+        except Exception as e:
+            log.error("Failed to fetch and write data.")
+            log.exception(e)
 
+        except AssertionError as e:
+            log.error("Blocked by TripAdvisor. Stopping scraping.")
+
+        finally:
             scrape_df = pd.DataFrame(scrape_info)
             parquet_file_path = f"data/tripadvisor__scrape_info_{datetime.now().strftime('%Y%m%d')}.parquet"
 
@@ -301,14 +345,10 @@ class TripAdvisorDataFetcher:
             self.bigquery.upload_parquet_to_bq(
                 file_path=parquet_file_path,
                 full_table_id=f"{dataset_id}.{scraper_table_id}",
-                write_disposition="WRITE_TRUNCATE",
+                write_disposition="WRITE_APPEND",
             )
 
             log.success("Data fetched, scraped, and written to BigQuery.")
-
-        except Exception as e:
-            log.error("Failed to fetch and write data.")
-            log.exception(e)
 
     def save_to_parquet(self, dataframe, parquet_file_path):
         """
