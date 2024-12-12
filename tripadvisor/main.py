@@ -95,13 +95,13 @@ class TripAdvisorDataFetcher:
         try:
             log.info(f"Fetch scraped location: {scraper_dataset_id}.{scraper_table_id}")
             query = f"""
-            SELECT location_id
+            SELECT DISTINCT location_id
             FROM `{self.project_id}.{scraper_dataset_id}.{scraper_table_id}`
             """
             dataframe = self.bigquery.fetch_bigquery(query)
             location_list = dataframe["location_id"].tolist()
             log.success(f"Fetched {len(location_list)} scraped location IDs.")
-            return location_list.unique()
+            return location_list
         except:
             log.error("Failed to fetch scraped data from BigQuery.")
             return []
@@ -335,20 +335,21 @@ class TripAdvisorDataFetcher:
             log.error("Blocked by TripAdvisor. Stopping scraping.")
 
         finally:
-            scrape_df = pd.DataFrame(scrape_info)
-            parquet_file_path = f"data/tripadvisor__scrape_info_{datetime.now().strftime('%Y%m%d')}.parquet"
+            if scrape_info and len(scrape_info) > 0:
+                scrape_df = pd.DataFrame(scrape_info)
+                parquet_file_path = f"data/tripadvisor__scrape_info_{datetime.now().strftime('%Y%m%d')}.parquet"
 
-            if not os.path.exists("data"):
-                os.makedirs("data")
+                if not os.path.exists("data"):
+                    os.makedirs("data")
 
-            self.save_to_parquet(scrape_df, parquet_file_path)
-            self.bigquery.upload_parquet_to_bq(
-                file_path=parquet_file_path,
-                full_table_id=f"{dataset_id}.{scraper_table_id}",
-                write_disposition="WRITE_APPEND",
-            )
+                self.save_to_parquet(scrape_df, parquet_file_path)
+                self.bigquery.upload_parquet_to_bq(
+                    file_path=parquet_file_path,
+                    full_table_id=f"{dataset_id}.{scraper_table_id}",
+                    write_disposition="WRITE_APPEND",
+                )
 
-            log.success("Data fetched, scraped, and written to BigQuery.")
+                log.success("Data fetched, scraped, and written to BigQuery.")
 
     def save_to_parquet(self, dataframe, parquet_file_path):
         """
