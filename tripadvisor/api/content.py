@@ -15,6 +15,15 @@ class TripAdvisorContentAPI:
         self.api_key = api_key
 
     def get_nearby_locations(self, lat, long):
+        """Get nearby locations based on latitude and longitude in a 1km radius.
+
+        Args:
+            lat (float): Latitude of the location
+            long (float): Longitude of the location
+
+        Returns:
+            dict: JSON response from the API
+        """
         url = f"{self.BASE_URL}?category=restaurants&radius=1&radiusUnit=km&latLong={lat},{long}&key={self.api_key}"
         response = requests.get(url, headers=self.HEADERS)
 
@@ -24,11 +33,21 @@ class TripAdvisorContentAPI:
         return response.json()
 
     def get_location_url(self, location_id, full=False):
-        """Get redirect URL of a location on TripAdvisor."""
+        """Get redirect URL of a location on TripAdvisor
+
+        Args:
+            location_id (str): Location ID on TripAdvisor
+            full (bool, optional): If True, return the full URL. Defaults to False.
+
+        Returns:
+            str: URL of the location
+        """
         if full:
             response = requests.get(
                 f"https://www.tripadvisor.com/{location_id}", headers=self.HEADERS
             )
+            assert response.status_code != 403, "Blocked by TripAdvisor"
+            assert response.status_code != 404, "Location not found"
             return response.url
 
         return f"https://www.tripadvisor.com/{location_id}"

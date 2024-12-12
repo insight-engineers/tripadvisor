@@ -13,7 +13,7 @@ from tripadvisor.scrape.utils import (fetch_soup_from_url, get_httpx_client,
 
 async def parse_reviews(url, count):
     """Parse the reviews of a restaurant and return the parsed information
-    Parameters:
+    Args:
         url (str): The URL of the restaurant.
         count (int): The number of all reviews in that page for cross-checking.
     """
@@ -125,7 +125,7 @@ async def parse_reviews(url, count):
 async def parse_source_page(url, soup) -> Dict:
     """Parse the source page and return the parsed information
 
-    Parameters:
+    Args:
         url (str): The URL of the source page.
         soup (BeautifulSoup): The BeautifulSoup object of the source
     """
@@ -236,7 +236,8 @@ async def parse_source_page(url, soup) -> Dict:
 
 async def scrape_url(url: str) -> List[Dict]:
     """Scrape a URL and return the parsed information from the url.
-    Parameters:
+
+    Args:
         url (str): The URL to scrape.
     """
 
@@ -264,7 +265,8 @@ async def scrape_url(url: str) -> List[Dict]:
             log.info(f"Error on attempt {attempt + 1}/{retries}: {e}")
             log.info(f"Retrying in {SCRAPE_DELAY * 2} seconds...")
             attempt += 1
-
+        except AssertionError:
+            raise AssertionError("Get blocked by TripAdvisor. Not trying again.")
         finally:
             await asyncio.sleep(SCRAPE_DELAY * 2)
 

@@ -6,7 +6,7 @@ SCRAPE CONFIG (in seconds) between each request to avoid being blocked by TripAd
 !Not change to lower than 2 second
 """
 SCRAPE_ENCODING = "utf-8"
-SCRAPE_DELAY = float(2.5)
+SCRAPE_DELAY = float(3)
 SCRAPE_TIMEOUT = float(150.0)
 SCRAPE_MAX_REVIEWS = int(300)  #! Should be divisible by 15
 
