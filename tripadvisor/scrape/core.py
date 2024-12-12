@@ -5,17 +5,26 @@ from typing import Dict, List
 
 from loguru import logger as log
 
-from tripadvisor._constants import SCRAPE_DELAY, SCRAPE_MAX_REVIEWS
-from tripadvisor.scrape.utils import (fetch_soup_from_url, get_httpx_client,
-                                      normalize_float, normalize_int,
-                                      normalize_text)
+from tripadvisor._constants import SCRAPE_DELAY, SCRAPE_MAX_REVIEWS, BASE_URL
+from tripadvisor.session import RotatingSessionManager
+from tripadvisor.scrape.utils import (
+    normalize_float,
+    normalize_int,
+    normalize_text,
+)
 
 
-async def parse_reviews(url, count):
+async def parse_reviews(
+    url, count, session_manager: RotatingSessionManager
+) -> List[Dict]:
     """Parse the reviews of a restaurant and return the parsed information
-    Parameters:
+
+    Args:
         url (str): The URL of the restaurant.
         count (int): The number of all reviews in that page for cross-checking.
+
+    Returns:
+        List[Dict]: A list of dictionaries containing the parsed reviews.
     """
     if count <= 0:
         log.warning("There are no reviews to parse. Skipping...")
@@ -33,10 +42,10 @@ async def parse_reviews(url, count):
             review_page_url = url.replace("-Reviews-", f"-Reviews-or{start}-")
         else:
             review_page_url = url
+
         log.info(f"Parsing: {review_page_url}")
 
-        async with get_httpx_client(follow_redirects=False) as client:
-            soup = await fetch_soup_from_url(client=client, url=review_page_url)
+        soup = await session_manager.fetch_soup_from_url(url=review_page_url)
 
         review_blocks = soup.select("div[data-automation='reviewCard']")
 
@@ -122,12 +131,16 @@ async def parse_reviews(url, count):
     return reviews
 
 
-async def parse_source_page(url, soup) -> Dict:
+async def parse_source_page(url, soup, session_manager: RotatingSessionManager) -> Dict:
     """Parse the source page and return the parsed information
 
     Parameters:
         url (str): The URL of the source page.
         soup (BeautifulSoup): The BeautifulSoup object of the source
+        session_manager (RotatingSessionManager): The session manager to use for fetching
+
+    Returns:
+        Dict: A dictionary containing the parsed information.
     """
 
     info_div = soup.find("div", {"data-test-target": "restaurant-detail-info"})
@@ -214,7 +227,7 @@ async def parse_source_page(url, soup) -> Dict:
     except:
         open_hour = None
 
-    reviews = await parse_reviews(url, review_count)
+    reviews = await parse_reviews(url, review_count, session_manager)
 
     return {
         "url": url,
@@ -234,10 +247,14 @@ async def parse_source_page(url, soup) -> Dict:
     }
 
 
-async def scrape_url(url: str) -> List[Dict]:
+async def scrape_url(url: str, session_manager: RotatingSessionManager) -> List[Dict]:
     """Scrape a URL and return the parsed information from the url.
+
     Parameters:
         url (str): The URL to scrape.
+
+    Returns:
+        List[Dict]: A list of dictionaries containing the parsed information.
     """
 
     attempt, retries = 0, 100
@@ -245,8 +262,7 @@ async def scrape_url(url: str) -> List[Dict]:
         try:
             log.info(f"Fetching URL: {url} for attempt {attempt + 1}/{retries}...")
 
-            async with get_httpx_client(follow_redirects=True) as client:
-                soup = await fetch_soup_from_url(client=client, url=url)
+            soup = await session_manager.fetch_soup_from_url(url)
 
             if (
                 soup.find("div", {"data-automation": "reviewsOverviewSections"})
@@ -254,7 +270,7 @@ async def scrape_url(url: str) -> List[Dict]:
                 and soup.find("div", {"data-test-target": "restaurant-detail-info"})
                 is not None
             ):
-                parsed_info = await parse_source_page(url, soup)
+                parsed_info = await parse_source_page(url, soup, session_manager)
                 return parsed_info
 
             log.info("Retrying fetch for overview tab...")
@@ -273,12 +289,23 @@ if __name__ == "__main__":
     TEST_URLS = [
         "https://www.tripadvisor.com/Restaurant_Review-g293925-d8614066-Reviews-Quan_B_i-Ho_Chi_Minh_City.html",
     ]
+    import dotenv
+
+    dotenv.load_dotenv()
+
+    aws_gateway_session = RotatingSessionManager(
+        base_url=BASE_URL,
+    )
+
+    aws_gateway_session.start()
 
     async def run():
         for URL in TEST_URLS:
-            parsed_info = await scrape_url(URL)
+            parsed_info = await scrape_url(URL, session_manager=aws_gateway_session)
             sink_file_path = f"data/TEST_{URL.split('Reviews-')[1].split('-')[0]}.json"
             with open(sink_file_path, "w") as f:
                 json.dump(parsed_info, f, indent=4)
+
+        aws_gateway_session.shutdown()
 
     asyncio.run(run())

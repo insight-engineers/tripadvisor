@@ -191,7 +191,10 @@ class TripAdvisorDataFetcher:
         """
         try:
             log.info(f"Scraping reviews for location ID: {location_id}...")
-            location_url = self.tripadvisor.get_location_url(location_id, full=True)
+            location_url = await self.tripadvisor.get_location_url(
+                location_id=location_id,
+                full=True,
+            )
             scrape_info = await scrape_url(location_url)
 
             if (

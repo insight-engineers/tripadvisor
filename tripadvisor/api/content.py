@@ -1,8 +1,10 @@
+import asyncio
 import os
 
 import requests
+from loguru import logger as log
 
-from tripadvisor._constants import BASE_HEADERS
+from tripadvisor._constants import BASE_HEADERS, SCRAPE_DELAY
 
 
 class TripAdvisorContentAPI:
@@ -23,15 +25,24 @@ class TripAdvisorContentAPI:
 
         return response.json()
 
-    def get_location_url(self, location_id, full=False):
+    async def get_location_url(self, location_id, full=False):
         """Get redirect URL of a location on TripAdvisor."""
-        if full:
-            response = requests.get(
-                f"https://www.tripadvisor.com/{location_id}", headers=self.HEADERS
-            )
-            return response.url
+        try:
+            asyncio.sleep(SCRAPE_DELAY / 2)
+            location_url = f"https://www.tripadvisor.com/{location_id}"
 
-        return f"https://www.tripadvisor.com/{location_id}"
+            if full:
+                response = requests.get(
+                    f"https://www.tripadvisor.com/{location_id}", headers=self.HEADERS
+                )
+                location_url = response.url
+
+        except Exception as e:
+            log.error(f"An error occurred: {e}")
+            location_url = None
+        finally:
+            asyncio.sleep(SCRAPE_DELAY / 2)
+            return location_url
 
 
 if __name__ == "__main__":

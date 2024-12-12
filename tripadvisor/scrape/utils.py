@@ -6,8 +6,12 @@ import httpx
 from bs4 import BeautifulSoup
 from loguru import logger as log
 
-from tripadvisor._constants import (BASE_HEADERS, SCRAPE_DELAY,
-                                    SCRAPE_ENCODING, SCRAPE_TIMEOUT)
+from tripadvisor._constants import (
+    BASE_HEADERS,
+    SCRAPE_DELAY,
+    SCRAPE_ENCODING,
+    SCRAPE_TIMEOUT,
+)
 
 
 def get_httpx_client(
