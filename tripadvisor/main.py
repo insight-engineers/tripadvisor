@@ -256,7 +256,7 @@ class TripAdvisorDataFetcher:
             log.warning("Need to reschedule scraping due to TripAdvisor blocking.")
             raise AssertionError("Get blocked by TripAdvisor. Stopping scraping.")
 
-    async def fetch_full_workflow(self, geolocations, max_workers=4) -> pd.DataFrame:
+    async def fetch_api_workflow(self, geolocations, max_workers=4) -> pd.DataFrame:
         """
         Fetch and scrape data for multiple geolocations.
 
@@ -269,8 +269,6 @@ class TripAdvisorDataFetcher:
         """
         log.info(f"Fetching for {len(geolocations)} geolocations...")
 
-        scrape_info = []
-
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             loop = asyncio.get_event_loop()
             location_results = await asyncio.gather(
@@ -280,15 +278,13 @@ class TripAdvisorDataFetcher:
                 ]
             )
 
-        for loc_data in location_results:
-            for location in loc_data:
-                scrape_result = await self.scrape_location(location)
-                if scrape_result:
-                    scrape_info.append(scrape_result)
-                await asyncio.sleep(SCRAPE_DELAY)
+        api_results = pd.DataFrame(
+            [location for locations in location_results for location in locations]
+        )
 
-        log.success(f"Successfully scraped {len(scrape_info)} locations.")
-        return pd.DataFrame(scrape_info)
+        api_results.drop_duplicates(subset=["location_id"], inplace=True, keep="first")
+
+        return api_results
 
     async def fetch_scraper_and_write(
         self,
@@ -368,7 +364,7 @@ class TripAdvisorDataFetcher:
             log.exception(e)
 
 
-async def run():
+async def run(run_api=False, run_scrape=False):
     log.info("Starting TripAdvisor data fetcher script...")
     try:
         tripadvisor = TripAdvisorDataFetcher(
@@ -380,12 +376,26 @@ async def run():
             rapid_api_key_env=args.rapid_api_key_env,
         )
 
-        await tripadvisor.fetch_scraper_and_write(
-            dataset_id=args.dataset_id,
-            location_list_table_id=args.location_list_table_id,
-            scraper_table_id=args.scraper_table_id,
-            max_locations=args.max_locations,
-        )
+        if run_api:
+            geolocations = tripadvisor.fetch_geolocation()
+
+            tripadvisor__api_results = await tripadvisor.fetch_api_workflow(
+                geolocations=geolocations[["latitude", "longitude"]].values.tolist()
+            )
+            tripadvisor__api_results.to_parquet("data/tripadvisor__api_results.parquet")
+            tripadvisor.bigquery.upload_parquet_to_bq(
+                file_path="data/tripadvisor__api_results.parquet",
+                full_table_id=f"{args.dataset_id}.{args.location_list_table_id}_v2",
+                write_disposition="WRITE_TRUNCATE",
+            )
+
+        if run_scrape:
+            await tripadvisor.fetch_scraper_and_write(
+                dataset_id=args.dataset_id,
+                location_list_table_id=args.location_list_table_id,
+                scraper_table_id=args.scraper_table_id,
+                max_locations=args.max_locations,
+            )
 
         log.info("TripAdvisor data fetcher script completed successfully!")
     except Exception as e:
@@ -397,4 +407,4 @@ if __name__ == "__main__":
     dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
     load_dotenv(dotenv_path)
     args = TripAdvisorParser.parse_arguments()
-    asyncio.run(run())
+    asyncio.run(run(args.api, args.scrape))

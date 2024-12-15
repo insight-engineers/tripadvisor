@@ -50,4 +50,4 @@ fi
 # Run the main Python program (echo with green color)
 echo -e "\033[0;32mScraping up to $MAX_LOCATIONS locations from TripAdvisor in 3 seconds...\033[0m"
 sleep 3
-$PYTHON_EXEC tripadvisor/main.py --max_locations "$MAX_LOCATIONS"
+$PYTHON_EXEC tripadvisor/main.py --scrape --max_locations "$MAX_LOCATIONS"
