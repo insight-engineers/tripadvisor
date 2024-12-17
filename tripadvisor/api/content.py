@@ -1,5 +1,5 @@
 import os
-
+import time
 import requests
 
 from tripadvisor._constants import BASE_HEADERS
@@ -23,13 +23,20 @@ class TripAdvisorContentAPI:
         Returns:
             dict: JSON response from the API
         """
-        url = f"{self.BASE_URL}/{location_id}/details?key={self.api_key}&language=vi"
-        response = requests.get(url, headers=self.HEADERS)
+        try:
+            url = (
+                f"{self.BASE_URL}/{location_id}/details?key={self.api_key}&language=vi"
+            )
+            response = requests.get(url, headers=self.HEADERS)
 
-        if response.status_code != 200:
-            response.raise_for_status()
+            if response.status_code != 200:
+                response.raise_for_status()
 
-        return response
+            return response.json()
+        except Exception as e:
+            raise ValueError(f"An error occurred: {e}")
+        finally:
+            time.sleep(1)
 
     def get_nearby_locations(self, lat, long):
         """Get nearby locations based on latitude and longitude in a 1km radius.

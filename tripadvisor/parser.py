@@ -62,5 +62,11 @@ class TripAdvisorParser:
             default=False,
             help="Run the scraper",
         )
+        parser.add_argument(
+            "--backfill",
+            action="store_true",
+            default=False,
+            help="Run the backfiller",
+        )
 
         return parser.parse_args()

@@ -21,6 +21,6 @@ if [ ! -x "$PYTHON_EXEC" ]; then
 fi
 
 # Run the main Python program (echo with green color)
-echo -e "\033[0;32mFetch API data from TripAdvisor in 3 seconds...\033[0m"
+echo -e "\033[0;32mBackfill wrong API data from TripAdvisor in 3 seconds...\033[0m"
 sleep 3
-$PYTHON_EXEC tripadvisor/main.py --api
+$PYTHON_EXEC tripadvisor/main.py --backfill

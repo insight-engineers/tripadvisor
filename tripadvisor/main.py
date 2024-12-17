@@ -106,6 +106,118 @@ class TripAdvisorDataFetcher:
             log.error("Failed to fetch scraped data from BigQuery.")
             return []
 
+    def fetch_wrong_location(self, dataset_id, table_id) -> list:
+        """
+        Fetch wrong location data from BigQuery.
+
+        Args:
+            dataset_id (str): BigQuery dataset ID containing wrong location data.
+            table_id (str): BigQuery table ID containing wrong location data.
+
+        Returns:
+            list: List of wrong location IDs.
+        """
+        try:
+            log.info(f"Fetching wrong location list from: {dataset_id}.{table_id}")
+            query = f"""
+            SELECT DISTINCT location_id
+            FROM `{self.project_id}.{dataset_id}.{table_id}`
+            WHERE REGEXP_CONTAINS(address_obj.address_string, r'_') OR REGEXP_CONTAINS(name, r'_')
+            """
+            dataframe = self.bigquery.fetch_bigquery(query)
+            location_list = dataframe["location_id"].tolist()
+
+            log.success(f"Fetched {len(location_list)} wrong location IDs.")
+            return location_list
+        except Exception as e:
+            log.error("No wrong location list found in BigQuery.")
+            log.exception(e)
+            return []
+
+    def fetch_location_details(self, location_id) -> dict:
+        """
+        Fetch location details from TripAdvisor API.
+
+        Args:
+            location_id (str): The location ID to fetch.
+
+        Returns:
+            dict: Location details dictionary.
+        """
+        try:
+            log.info(f"Fetching location details for location ID: {location_id}")
+            location_details = self.tripadvisor.get_location_details(location_id)
+
+            return {
+                "location_id": location_id,
+                "name": location_details["name"],
+                "distance": "0.00000000000000000",
+                "bearing": "none",
+                "address_obj": location_details["address_obj"],
+            }
+
+        except Exception as e:
+            log.error(
+                f"Failed to fetch location details for location ID: {location_id}"
+            )
+            log.exception(e)
+
+    def backfill_wrong_location(
+        self, dataset_id, table_id, wrong_location_list
+    ) -> list:
+        """
+        Backfill wrong location data from BigQuery.
+
+        Args:
+            dataset_id (str): BigQuery dataset ID containing wrong location data.
+            table_id (str): BigQuery table ID containing wrong location data.
+            wrong_location_list (list): List of wrong location IDs.
+        """
+        try:
+            log.info(f"Backfill wrong location list from: {dataset_id}.{table_id}")
+            query = f"""
+            SELECT *
+            FROM `{self.project_id}.{dataset_id}.{table_id}`
+            """
+            original_df = self.bigquery.fetch_bigquery(query)
+            original_df.drop_duplicates(
+                subset=["location_id"], keep="first", inplace=True
+            )
+            backfill_df = original_df[
+                original_df["location_id"].isin(wrong_location_list)
+            ]
+
+            if backfill_df.empty:
+                log.info("No wrong location to backfill.")
+                return
+
+            location_results = []
+            for location_id in wrong_location_list:
+                location_data = self.fetch_location_details(location_id)
+                location_results.append(location_data)
+
+        except Exception as e:
+            log.error("Failed to backfill wrong location data.")
+            log.exception(e)
+        finally:
+            if location_results and len(location_results) > 0:
+                location_df = original_df.set_index("location_id")
+                backfill_df = pd.DataFrame(location_results).set_index("location_id")
+                location_df.update(backfill_df, overwrite=True)
+
+                location_df.reset_index(inplace=True)
+                location_df.to_parquet(
+                    f"data/tripadvisor__backfill_{datetime.now().strftime('%Y%m%d')}.parquet",
+                    index=False,
+                )
+                self.bigquery.upload_parquet_to_bq(
+                    file_path=f"data/tripadvisor__backfill_{datetime.now().strftime('%Y%m%d')}.parquet",
+                    full_table_id=f"{dataset_id}.{table_id}_v2",
+                    write_disposition="WRITE_TRUNCATE",
+                )
+
+                log.success(f"Backfilled {len(location_results)} wrong locations.")
+
     def fetch_location_data(self, lat, long) -> list:
         """
         Fetch location data from TripAdvisor API for a given latitude and longitude.
@@ -364,7 +476,7 @@ class TripAdvisorDataFetcher:
             log.exception(e)
 
 
-async def run(run_api=False, run_scrape=False):
+async def run(run_api=False, run_scrape=False, run_backfill=False):
     log.info("Starting TripAdvisor data fetcher script...")
     try:
         tripadvisor = TripAdvisorDataFetcher(
@@ -389,6 +501,16 @@ async def run(run_api=False, run_scrape=False):
                 write_disposition="WRITE_TRUNCATE",
             )
 
+        if run_backfill:
+            wrong_location_list = tripadvisor.fetch_wrong_location(
+                dataset_id=args.dataset_id, table_id=args.location_list_table_id
+            )
+            tripadvisor.backfill_wrong_location(
+                dataset_id=args.dataset_id,
+                table_id=args.location_list_table_id,
+                wrong_location_list=wrong_location_list,
+            )
+
         if run_scrape:
             await tripadvisor.fetch_scraper_and_write(
                 dataset_id=args.dataset_id,
@@ -407,4 +529,4 @@ if __name__ == "__main__":
     dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
     load_dotenv(dotenv_path)
     args = TripAdvisorParser.parse_arguments()
-    asyncio.run(run(args.api, args.scrape))
+    asyncio.run(run(args.api, args.scrape, args.backfill))
