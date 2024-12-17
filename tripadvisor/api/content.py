@@ -1,18 +1,42 @@
 import os
-
+import time
 import requests
 
 from tripadvisor._constants import BASE_HEADERS
 
 
 class TripAdvisorContentAPI:
-    BASE_URL = "https://api.content.tripadvisor.com/api/v1/location/nearby_search"
+    BASE_URL = "https://api.content.tripadvisor.com/api/v1/location"
     HEADERS = BASE_HEADERS
 
     def __init__(self, api_key):
         if not api_key:
             raise ValueError("API key is not set. Please provide a valid API key.")
         self.api_key = api_key
+
+    def get_location_details(self, location_id):
+        """Get details of a location based on its ID.
+
+        Args:
+            location_id (str): Location ID on TripAdvisor
+
+        Returns:
+            dict: JSON response from the API
+        """
+        try:
+            url = (
+                f"{self.BASE_URL}/{location_id}/details?key={self.api_key}&language=vi"
+            )
+            response = requests.get(url, headers=self.HEADERS)
+
+            if response.status_code != 200:
+                response.raise_for_status()
+
+            return response.json()
+        except Exception as e:
+            raise ValueError(f"An error occurred: {e}")
+        finally:
+            time.sleep(1)
 
     def get_nearby_locations(self, lat, long):
         """Get nearby locations based on latitude and longitude in a 1km radius.
@@ -24,7 +48,7 @@ class TripAdvisorContentAPI:
         Returns:
             dict: JSON response from the API
         """
-        url = f"{self.BASE_URL}?category=restaurants&radius=1&radiusUnit=km&latLong={lat},{long}&key={self.api_key}"
+        url = f"{self.BASE_URL}/nearby_search?category=restaurants&radius=1&radiusUnit=km&latLong={lat},{long}&key={self.api_key}&language=vi"
         response = requests.get(url, headers=self.HEADERS)
 
         if response.status_code != 200:

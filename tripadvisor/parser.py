@@ -50,5 +50,23 @@ class TripAdvisorParser:
             default=-1,
             help="Maximum locations to fetch",
         )
+        parser.add_argument(
+            "--api",
+            action="store_true",
+            default=False,
+            help="Run the API fetcher",
+        )
+        parser.add_argument(
+            "--scrape",
+            action="store_true",
+            default=False,
+            help="Run the scraper",
+        )
+        parser.add_argument(
+            "--backfill",
+            action="store_true",
+            default=False,
+            help="Run the backfiller",
+        )
 
         return parser.parse_args()
