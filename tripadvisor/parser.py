@@ -36,7 +36,7 @@ class TripAdvisorParser:
         )
         parser.add_argument(
             "--location_list_table_id",
-            default="source_tripadvisor__api_info",
+            default="source_tripadvisor__api_info_v2",
             help="Location list table ID",
         )
         parser.add_argument(
