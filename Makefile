@@ -1,3 +1,3 @@
 format:
-	uvx black .
-	uvx isort .
+	uv run ruff check --select I --fix
+	uv run ruff format

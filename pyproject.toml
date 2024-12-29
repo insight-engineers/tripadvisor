@@ -24,11 +24,12 @@ dependencies = [
     "beautifulsoup4>=4.12.3",
     "sqlparse>=0.5.2",
     "protobuf>=5.29.1",
+    "ruff>=0.8.4",
+    "boto3>=1.35.90",
+    "s3fs<=0.4.2",
 ]
 
 [dependency-groups]
 dev = [
-    "black>=24.10.0",
-    "isort>=5.13.2",
     "pre-commit>=4.0.1",
 ]

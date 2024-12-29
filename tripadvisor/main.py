@@ -1,13 +1,13 @@
 import asyncio
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import pandas as pd
-from dotenv import load_dotenv
 from loguru import logger as log
 
-from tripadvisor._constants import SCRAPE_DELAY
+from tripadvisor._constants import AWS_CREDENTIALS, AWS_S3_BUCKET, SCRAPE_DELAY
 from tripadvisor.api.content import TripAdvisorContentAPI
 from tripadvisor.api.rapid import TripAdvisorRapidAPI
 from tripadvisor.bigquery import BigQueryHandler
@@ -475,8 +475,35 @@ class TripAdvisorDataFetcher:
             log.error(f"Failed to save DataFrame to {parquet_file_path}.")
             log.exception(e)
 
+    def backup_to_parquet(self, dataset_id, table_id, parquet_file_path, **kwargs):
+        """
+        Backup a BigQuery table to a Parquet file.
 
-async def run(run_api=False, run_scrape=False, run_backfill=False):
+        Args:
+            dataset_id (str): BigQuery dataset ID.
+            table_id (str): BigQuery table ID.
+            parquet_file_path (str): The path to the Parquet file.
+            **kwargs: Additional arguments for the to_parquet method.
+        """
+        try:
+            query = f"""
+            SELECT *
+            FROM `{self.project_id}.{dataset_id}.{table_id}`
+            """
+
+            dataframe = self.bigquery.fetch_bigquery(query)
+            log.info(f"Fetch total {len(dataframe)} records for backup")
+
+            dataframe.to_parquet(parquet_file_path, index=False, **kwargs)
+
+            log.success(f"Data backed up to {parquet_file_path}.")
+            return parquet_file_path
+        except Exception as e:
+            log.error(f"Failed to backup data to {parquet_file_path}.")
+            log.exception(e)
+
+
+async def run(run_api=False, run_scrape=False, run_backfill=False, run_backup=False):
     log.info("Starting TripAdvisor data fetcher script...")
     try:
         tripadvisor = TripAdvisorDataFetcher(
@@ -519,6 +546,24 @@ async def run(run_api=False, run_scrape=False, run_backfill=False):
                 max_locations=args.max_locations,
             )
 
+        if run_backup:
+            s3_path = f"s3://{AWS_S3_BUCKET}"
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            tripadvisor.backup_to_parquet(
+                dataset_id=args.dataset_id,
+                table_id=args.location_list_table_id,
+                parquet_file_path=f"{s3_path}/{args.location_list_table_id.split('_v')[0]}_{timestamp}.parquet",
+                storage_options=AWS_CREDENTIALS,
+            )
+
+            tripadvisor.backup_to_parquet(
+                dataset_id=args.dataset_id,
+                table_id=args.scraper_table_id,
+                parquet_file_path=f"{s3_path}/{args.scraper_table_id.split('_v')[0]}_{timestamp}.parquet",
+                storage_options=AWS_CREDENTIALS,
+            )
+
         log.info("TripAdvisor data fetcher script completed successfully!")
     except Exception as e:
         log.error("Script encountered an error.")
@@ -526,7 +571,6 @@ async def run(run_api=False, run_scrape=False, run_backfill=False):
 
 
 if __name__ == "__main__":
-    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-    load_dotenv(dotenv_path)
+    warnings.filterwarnings("ignore")
     args = TripAdvisorParser.parse_arguments()
-    asyncio.run(run(args.api, args.scrape, args.backfill))
+    asyncio.run(run(args.api, args.scrape, args.backfill, args.backup))

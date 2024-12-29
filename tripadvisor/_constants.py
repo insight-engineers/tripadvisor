@@ -1,10 +1,18 @@
 #!/usr/bin/env python
 #!Encoding: utf-8
+# NOTE: This file contains all the constants used in the project.
+import os
+
+from dotenv import load_dotenv
+
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+load_dotenv(dotenv_path)
 
 """
 SCRAPE CONFIG (in seconds) between each request to avoid being blocked by TripAdvisor.
 !Not change to lower than 2 second
 """
+
 SCRAPE_ENCODING = "utf-8"
 SCRAPE_DELAY = float(3)
 SCRAPE_TIMEOUT = float(150.0)
@@ -24,4 +32,14 @@ BASE_HEADERS = {
     "User-Agent": BASE_AGENT,
     "Accept": BASE_ACCEPT,
     "Accept-Language": BASE_LANGUAGE,
+}
+
+"""
+NOTE: AWS S3 CONFIG
+"""
+AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
+AWS_CREDENTIALS = {
+    "key": os.environ.get("AWS_ACCESS_KEY_ID"),
+    "secret": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    "s3_additional_kwargs": {"ACL": "bucket-owner-full-control"},
 }

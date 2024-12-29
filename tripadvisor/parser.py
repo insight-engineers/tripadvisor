@@ -68,5 +68,11 @@ class TripAdvisorParser:
             default=False,
             help="Run the backfiller",
         )
+        parser.add_argument(
+            "--backup",
+            action="store_true",
+            default=False,
+            help="Run the backup",
+        )
 
         return parser.parse_args()
