@@ -12,7 +12,7 @@ from tripadvisor.api.content import TripAdvisorContentAPI
 from tripadvisor.api.rapid import TripAdvisorRapidAPI
 from tripadvisor.bigquery import BigQueryHandler
 from tripadvisor.parser import TripAdvisorParser
-from tripadvisor.scrape.core import scrape_url
+from tripadvisor.scrape.core import parse_reviews, scrape_url
 
 
 class TripAdvisorDataFetcher:
@@ -162,9 +162,7 @@ class TripAdvisorDataFetcher:
             )
             log.exception(e)
 
-    def backfill_wrong_location(
-        self, dataset_id, table_id, wrong_location_list
-    ) -> list:
+    def backfill_wrong_location(self, dataset_id, table_id, wrong_location_list):
         """
         Backfill wrong location data from BigQuery.
 
@@ -217,6 +215,103 @@ class TripAdvisorDataFetcher:
                 )
 
                 log.success(f"Backfilled {len(location_results)} wrong locations.")
+
+    async def backfill_reviews(self, dataset_id, table_id):
+        """
+        Backfill reviews for locations in a BigQuery table. The function fetches data from a source table,
+        identifies locations needing review data updates, parses reviews, and appends the backfilled data
+        to a `_v2` table with a nested reviews column.
+
+        Args:
+            dataset_id (str): BigQuery dataset ID containing location data.
+            table_id (str): BigQuery table ID containing location data.
+        """
+        parsed_reviews = []
+
+        try:
+            log.info(f"Starting backfill for {dataset_id}.{table_id}")
+
+            backfill_table_id = f"{table_id}_v2"
+            try:
+                query = f"""
+                SELECT location_id
+                FROM `{self.project_id}.{dataset_id}.{backfill_table_id}`
+                """
+                backfilled_df = self.bigquery.fetch_bigquery(query)
+                backfilled_ids = set(backfilled_df["location_id"])
+                log.info(
+                    f"Found {len(backfilled_ids)} backfilled locations in {backfill_table_id}."
+                )
+            except Exception:
+                log.warning(
+                    f"{backfill_table_id} does not exist. Proceeding with full backfill."
+                )
+                backfilled_ids = set()
+
+            query = f"""
+            SELECT * EXCEPT (reviews)
+            FROM `{self.project_id}.{dataset_id}.{table_id}`
+            WHERE review_count_scraped > 0
+            """
+            original_df = self.bigquery.fetch_bigquery(query)
+
+            # Identify locations not backfilled
+            original_ids = set(original_df["location_id"])
+            locations_to_backfill = original_ids - backfilled_ids
+
+            if not locations_to_backfill:
+                log.info("No new locations to backfill reviews.")
+                return
+
+            log.info(f"Found {len(locations_to_backfill)} locations to backfill.")
+
+            locations_to_parse = original_df[
+                original_df["location_id"].isin(locations_to_backfill)
+            ]
+            for _, row in locations_to_parse.iterrows():
+                location_id = row["location_id"]
+                location_url = row["location_url"]
+                review_count = row["review_count"]
+                log.info(f"Parsing reviews for location_id={location_id}")
+                parsed_data = await parse_reviews(location_url, review_count)
+
+                parsed_reviews.append(
+                    {**row.to_dict(), "reviews": parsed_data if parsed_data else []}
+                )
+
+                await asyncio.sleep(SCRAPE_DELAY)
+
+        except Exception as e:
+            log.error("An error occurred during the backfill process.")
+            log.exception(e)
+        finally:
+            if parsed_reviews and len(parsed_reviews) > 0:
+                backfilled_data_df = pd.DataFrame(parsed_reviews)
+
+                if not backfilled_ids:
+                    query = f"""
+                    SELECT * EXCEPT (reviews)
+                    FROM `{self.project_id}.{dataset_id}.{table_id}`
+                    WHERE review_count_scraped = 0
+                    """
+
+                    original_df = self.bigquery.fetch_bigquery(query)
+                    original_df["reviews"] = [None] * len(original_df)
+                    backfilled_data_df = pd.concat([backfilled_data_df, original_df])
+
+                parquet_file_path = f"data/tripadvisor__backfill_{datetime.now().strftime('%Y%m%d')}.parquet"
+                backfilled_data_df.to_parquet(parquet_file_path, index=False)
+                await asyncio.sleep(SCRAPE_DELAY)
+
+                self.bigquery.upload_parquet_to_bq(
+                    file_path=parquet_file_path,
+                    full_table_id=f"{dataset_id}.{backfill_table_id}",
+                    write_disposition="WRITE_APPEND",
+                )
+
+                log.success(f"Backfilled {len(parsed_reviews)} location reviews.")
+            else:
+                log.info("No reviews were parsed.")
 
     def fetch_location_data(self, lat, long) -> list:
         """
@@ -503,7 +598,13 @@ class TripAdvisorDataFetcher:
             log.exception(e)
 
 
-async def run(run_api=False, run_scrape=False, run_backfill=False, run_backup=False):
+async def run(
+    run_api=False,
+    run_scrape=False,
+    run_backfill=False,
+    run_backup=False,
+    run_backfill_reviews=False,
+):
     log.info("Starting TripAdvisor data fetcher script...")
     try:
         tripadvisor = TripAdvisorDataFetcher(
@@ -564,6 +665,11 @@ async def run(run_api=False, run_scrape=False, run_backfill=False, run_backup=Fa
                 storage_options=AWS_CREDENTIALS,
             )
 
+        if run_backfill_reviews:
+            await tripadvisor.backfill_reviews(
+                dataset_id=args.dataset_id, table_id=args.scraper_table_id
+            )
+
         log.info("TripAdvisor data fetcher script completed successfully!")
     except Exception as e:
         log.error("Script encountered an error.")
@@ -573,4 +679,6 @@ async def run(run_api=False, run_scrape=False, run_backfill=False, run_backup=Fa
 if __name__ == "__main__":
     warnings.filterwarnings("ignore")
     args = TripAdvisorParser.parse_arguments()
-    asyncio.run(run(args.api, args.scrape, args.backfill, args.backup))
+    asyncio.run(
+        run(args.api, args.scrape, args.backfill, args.backup, args.backfill_reviews)
+    )

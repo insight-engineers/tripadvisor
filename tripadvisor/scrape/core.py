@@ -52,8 +52,19 @@ async def parse_reviews(url, count):
             try:
                 review_tag = review.select_one("a[target*='_self']")
                 review_userid = normalize_text(review_tag.get("href").split("/")[-1])
+                review_username = review_tag.select_one("img").get("alt")
+
             except:
                 review_userid = None
+                review_username = None
+
+            try:
+                user_country_tag = review.select_one("div.biGQs._P.pZUbB.osNWb span")
+                review_usercountry = user_country_tag.get_text(strip=True)
+                if "contribution" in review_usercountry:
+                    review_usercountry = None
+            except:
+                review_usercountry = None
 
             try:
                 review_title = normalize_text(
@@ -110,6 +121,8 @@ async def parse_reviews(url, count):
             reviews.append(
                 {
                     "user": review_userid,
+                    "username": review_username,
+                    "country": review_usercountry,
                     "title": review_title,
                     "text": review_text.replace("Read more", "").strip(),
                     "rating": rating,
@@ -118,10 +131,10 @@ async def parse_reviews(url, count):
                 }
             )
 
+            await asyncio.sleep(SCRAPE_DELAY / 2)
+
         if len(reviews) >= max_reviews:
             break
-
-        await asyncio.sleep(SCRAPE_DELAY)
 
     return reviews
 
