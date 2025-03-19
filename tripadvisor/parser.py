@@ -80,5 +80,10 @@ class TripAdvisorParser:
             default=False,
             help="Run the reviews backfill",
         )
+        parser.add_argument(
+            "--province_code",
+            default="HCM",
+            help="HCM,HAN,DAN",
+        )
 
         return parser.parse_args()

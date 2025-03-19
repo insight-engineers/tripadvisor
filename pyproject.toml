@@ -10,7 +10,7 @@ name = "tripadvisor"
 version = "0.1.0"
 description = "A simple web graphing data fetching tool from Tripadvisor"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "asyncio>=3.4.3",
     "google-cloud-bigquery-storage>=2.27.0",
@@ -27,6 +27,7 @@ dependencies = [
     "ruff>=0.8.4",
     "boto3>=1.35.90",
     "s3fs<=0.4.2",
+    "tenacity>=9.0.0",
 ]
 
 [dependency-groups]

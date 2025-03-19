@@ -1,11 +1,13 @@
 import asyncio
 import os
+import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import pandas as pd
 from loguru import logger as log
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from tripadvisor._constants import AWS_CREDENTIALS, AWS_S3_BUCKET, SCRAPE_DELAY
 from tripadvisor.api.content import TripAdvisorContentAPI
@@ -60,7 +62,7 @@ class TripAdvisorDataFetcher:
 
         log.success("TripAdvisorDataFetcher initialized successfully!")
 
-    def fetch_geolocation(self) -> pd.DataFrame:
+    def fetch_geolocation(self, province_code: str = "HCM") -> pd.DataFrame:
         """
         Fetch geolocation data from BigQuery.
 
@@ -72,6 +74,7 @@ class TripAdvisorDataFetcher:
             query = f"""
             SELECT latitude, longitude
             FROM `{self.project_id}.{self.geo_dataset_id}.{self.geo_table_id}`
+            WHERE province_code = '{province_code}'
             """
             dataframe = self.bigquery.fetch_bigquery(query)
             log.success(f"Fetched {len(dataframe)} geolocation records from BigQuery.")
@@ -313,6 +316,11 @@ class TripAdvisorDataFetcher:
             else:
                 log.info("No reviews were parsed.")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=(lambda exc: isinstance(exc, (PermissionError))),
+    )
     def fetch_location_data(self, lat, long) -> list:
         """
         Fetch location data from TripAdvisor API for a given latitude and longitude.
@@ -334,7 +342,9 @@ class TripAdvisorDataFetcher:
                 f"Failed to fetch location data for latitude={lat}, longitude={long}."
             )
             log.exception(e)
-            return []
+            raise PermissionError("Failed to fetch location data.")
+        finally:
+            time.sleep(1)
 
     def fetch_location_list(self, dataset_id, table_id) -> list:
         """
@@ -463,31 +473,24 @@ class TripAdvisorDataFetcher:
             log.warning("Need to reschedule scraping due to TripAdvisor blocking.")
             raise AssertionError("Get blocked by TripAdvisor. Stopping scraping.")
 
-    async def fetch_api_workflow(self, geolocations, max_workers=4) -> pd.DataFrame:
+    async def fetch_api_workflow(self, geolocations) -> pd.DataFrame:
         """
         Fetch and scrape data for multiple geolocations.
 
         Args:
             geolocations (list): List of geolocation tuples (latitude, longitude).
-            max_workers (int): Number of concurrent threads for fetching.
 
         Returns:
             pd.DataFrame: DataFrame containing scraped information.
         """
         log.info(f"Fetching for {len(geolocations)} geolocations...")
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            loop = asyncio.get_event_loop()
-            location_results = await asyncio.gather(
-                *[
-                    loop.run_in_executor(executor, self.fetch_location_data, lat, long)
-                    for lat, long in geolocations
-                ]
-            )
+        location_results = []
+        for lat, long in geolocations:
+            location_data = self.fetch_location_data(lat, long)
+            location_results.extend(location_data)
 
-        api_results = pd.DataFrame(
-            [location for locations in location_results for location in locations]
-        )
+        api_results = pd.DataFrame(location_results)
 
         api_results.drop_duplicates(subset=["location_id"], inplace=True, keep="first")
 
@@ -604,6 +607,7 @@ async def run(
     run_backfill=False,
     run_backup=False,
     run_backfill_reviews=False,
+    province_code="HCM",
 ):
     log.info("Starting TripAdvisor data fetcher script...")
     try:
@@ -617,16 +621,18 @@ async def run(
         )
 
         if run_api:
-            geolocations = tripadvisor.fetch_geolocation()
+            geolocations = tripadvisor.fetch_geolocation(province_code=province_code)
 
             tripadvisor__api_results = await tripadvisor.fetch_api_workflow(
                 geolocations=geolocations[["latitude", "longitude"]].values.tolist()
             )
-            tripadvisor__api_results.to_parquet("data/tripadvisor__api_results.parquet")
+
+            parquet_filepath = f"data/tripadvisor__api_results_{province_code}.parquet"
+            tripadvisor__api_results.to_parquet(parquet_filepath)
             tripadvisor.bigquery.upload_parquet_to_bq(
-                file_path="data/tripadvisor__api_results.parquet",
+                file_path=parquet_filepath,
                 full_table_id=f"{args.dataset_id}.{args.location_list_table_id}_v2",
-                write_disposition="WRITE_TRUNCATE",
+                write_disposition="WRITE_APPEND",
             )
 
         if run_backfill:
@@ -680,5 +686,12 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore")
     args = TripAdvisorParser.parse_arguments()
     asyncio.run(
-        run(args.api, args.scrape, args.backfill, args.backup, args.backfill_reviews)
+        run(
+            args.api,
+            args.scrape,
+            args.backfill,
+            args.backup,
+            args.backfill_reviews,
+            args.province_code,
+        )
     )
