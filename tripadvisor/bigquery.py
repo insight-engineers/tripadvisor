@@ -42,14 +42,6 @@ class BigQueryHandler:
             query (str): The query to normalize.
         """
         _query = query.strip().rstrip(";")
-        _query = sqlparse.format(
-            _query,
-            reindent=True,
-            strip_comments=True,
-            strip_whitespace=True,
-            keyword_case="upper",
-        )
-
         log.debug("Normalized query:\n{}".format(_query))
         return _query
 
